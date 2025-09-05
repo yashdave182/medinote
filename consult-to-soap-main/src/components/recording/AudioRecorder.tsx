@@ -268,7 +268,10 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
 
       const res = await fetch(fnUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`
+        },
         body: JSON.stringify({ audioBase64, mimeType: audioBlob.type }),
       });
 
