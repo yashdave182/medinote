@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -27,9 +27,11 @@ interface MedicalNote {
   assessment: string;
   plan: string;
   raw_transcript: string;
-  extracted_entities: any;
+  extracted_entities: Record<string, unknown>;
   is_reviewed: boolean;
 }
+
+type DBError = { code?: string; message?: string } | Error;
 
 export const ConsultationPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -44,14 +46,7 @@ export const ConsultationPage: React.FC = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [activeTab, setActiveTab] = useState('recording');
 
-  useEffect(() => {
-    if (id) {
-      fetchConsultation();
-      fetchMedicalNote();
-    }
-  }, [id]);
-
-  const fetchConsultation = async () => {
+  const fetchConsultation = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('consultations')
@@ -61,7 +56,7 @@ export const ConsultationPage: React.FC = () => {
 
       if (error) throw error;
       setConsultation(data as Consultation);
-    } catch (error: any) {
+    } catch (error) {
       toast({
         title: "Error",
         description: "Failed to load consultation",
@@ -69,9 +64,9 @@ export const ConsultationPage: React.FC = () => {
       });
       navigate('/');
     }
-  };
+  }, [id, navigate, toast]);
 
-  const fetchMedicalNote = async () => {
+  const fetchMedicalNote = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('medical_notes')
@@ -79,18 +74,26 @@ export const ConsultationPage: React.FC = () => {
         .eq('consultation_id', id)
         .maybeSingle();
 
-      if (error && error.code !== 'PGRST116') throw error;
+  if (error && ((error as DBError).code ?? '') !== 'PGRST116') throw error;
       setMedicalNote(data as MedicalNote);
-      
-      if (data) {
-        setActiveTab('notes');
-      }
-    } catch (error: any) {
-      console.error('Error fetching medical note:', error);
+      if (data) setActiveTab('notes');
+    } catch (error: unknown) {
+      const e = error as Error;
+      // Log and continue
+      console.error('Error fetching medical note:', e.message || e);
     } finally {
       setLoading(false);
     }
-  };
+  }, [id]);
+
+  useEffect(() => {
+    if (id) {
+      fetchConsultation();
+      fetchMedicalNote();
+    }
+  }, [id, fetchConsultation, fetchMedicalNote]);
+
+  // (fetchConsultation and fetchMedicalNote implemented above with useCallback)
 
   const handleTranscriptionComplete = async (transcript: string, audioBlob: Blob) => {
     setIsProcessing(true);
@@ -171,7 +174,7 @@ export const ConsultationPage: React.FC = () => {
         title: "Transcript Simplified",
         description: "Download ready and note saved.",
       });
-    } catch (error: any) {
+  } catch (error) {
       toast({
         title: "Processing Error",
         description: "Failed to generate medical note. Please try again.",
@@ -214,12 +217,14 @@ export const ConsultationPage: React.FC = () => {
         title: "Consultation Completed",
         description: "Consultation has been marked as completed.",
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const e = error as Error;
       toast({
         title: "Error",
         description: "Failed to complete consultation",
         variant: "destructive",
       });
+      console.error('Complete consultation error:', e.message || e);
     }
   };
 

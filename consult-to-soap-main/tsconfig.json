@@ -16,4 +16,9 @@
     "noUnusedLocals": false,
     "strictNullChecks": false
   }
+  ,
+  "exclude": [
+    "supabase/functions/**",
+    "**/*.timestamp-*.mjs"
+  ]
 }
