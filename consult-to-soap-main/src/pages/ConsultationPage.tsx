@@ -95,35 +95,57 @@ export const ConsultationPage: React.FC = () => {
   const handleTranscriptionComplete = async (transcript: string, audioBlob: Blob) => {
     setIsProcessing(true);
     try {
-      // Generate SOAP note
-      const response = await fetch('https://wklwoeaghlgffiegorzv.functions.supabase.co/generate-soap-note', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          transcript,
-          patientName: consultation?.patient_name,
-        }),
-      });
+      console.log('Received transcript:', transcript);
+      console.log('Transcript length:', transcript?.length || 0);
+      
+      // Check if transcript is valid
+      if (!transcript || transcript.trim().length === 0) {
+        console.log('No transcript received, creating note with placeholder text');
+        // Create a note with placeholder text instead of failing
+        const placeholderText = 'Audio recorded but transcription failed. Please review the audio manually.';
+        
+        const { data, error } = await supabase
+          .from('medical_notes')
+          .upsert({
+            consultation_id: id,
+            subjective: placeholderText,
+            objective: '',
+            assessment: '',
+            plan: '',
+            raw_transcript: 'Transcription failed',
+            extracted_entities: {},
+            is_reviewed: false,
+          })
+          .select()
+          .single();
 
-      if (!response.ok) {
-        throw new Error('Failed to generate SOAP note');
+        if (error) throw error;
+
+        setMedicalNote(data as MedicalNote);
+        setActiveTab('notes');
+        
+        toast({
+          title: "Note Created",
+          description: "Audio recorded but transcription failed. Please review manually.",
+          variant: "destructive",
+        });
+        return;
       }
 
-      const soapData = await response.json();
+  // Keep the full raw transcript as the note content. Do not simplify or remove medical terms.
+  const simplified = transcript;
 
-      // Save to database
+      // Save to database (store simplified text in subjective and raw transcript)
       const { data, error } = await supabase
         .from('medical_notes')
         .upsert({
           consultation_id: id,
-          subjective: soapData.subjective || '',
-          objective: soapData.objective || '',
-          assessment: soapData.assessment || '',
-          plan: soapData.plan || '',
+          subjective: simplified || '',
+          objective: '',
+          assessment: '',
+          plan: '',
           raw_transcript: transcript,
-          extracted_entities: soapData.extracted_entities || {},
+          extracted_entities: {},
           is_reviewed: false,
         })
         .select()
@@ -133,10 +155,21 @@ export const ConsultationPage: React.FC = () => {
 
       setMedicalNote(data as MedicalNote);
       setActiveTab('notes');
+
+  // Trigger download of transcript text
+  const blob = new Blob([simplified || ''], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `transcript-${consultation?.patient_name || 'patient'}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
       
       toast({
-        title: "SOAP Note Generated",
-        description: "Medical note has been created from the consultation recording.",
+        title: "Transcript Simplified",
+        description: "Download ready and note saved.",
       });
     } catch (error: any) {
       toast({

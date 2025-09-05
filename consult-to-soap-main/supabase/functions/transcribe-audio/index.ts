@@ -57,30 +57,69 @@ serve(async (req) => {
     const formData = new FormData()
     const blob = new Blob([binaryAudio], { type: 'audio/webm' })
     formData.append('file', blob, 'audio.webm')
-    formData.append('model', 'whisper-1')
+    // Use AssemblyAI for transcription to preserve full speech content.
+    const assemblyApiKey = Deno.env.get('ASSEMBLYAI_API_KEY')
+    if (!assemblyApiKey) throw new Error('ASSEMBLYAI_API_KEY is not set')
 
-    // Send to OpenAI
-    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    // Upload audio to AssemblyAI
+    const uploadResponse = await fetch('https://api.assemblyai.com/v2/upload', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${Deno.env.get('OPENAI_API_KEY')}`,
+        'Authorization': assemblyApiKey,
+        'Content-Type': 'application/octet-stream',
       },
-      body: formData,
+      body: binaryAudio,
     })
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('OpenAI API error:', errorText);
-      throw new Error(`OpenAI API error: ${errorText}`)
+    if (!uploadResponse.ok) {
+      const err = await uploadResponse.text()
+      console.error('AssemblyAI upload error:', err)
+      throw new Error(`AssemblyAI upload error: ${err}`)
     }
 
-    const result = await response.json()
-    console.log('Transcription completed successfully');
+    const { upload_url } = await uploadResponse.json()
 
-    return new Response(
-      JSON.stringify({ text: result.text }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+    // Start transcription
+    const transcribeResponse = await fetch('https://api.assemblyai.com/v2/transcript', {
+      method: 'POST',
+      headers: {
+        'Authorization': assemblyApiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ audio_url: upload_url, language_code: 'en_us', punctuate: true, format_text: true }),
+    })
+
+    if (!transcribeResponse.ok) {
+      const err = await transcribeResponse.text()
+      console.error('AssemblyAI transcription error:', err)
+      throw new Error(`AssemblyAI transcription error: ${err}`)
+    }
+
+    const { id } = await transcribeResponse.json()
+
+    // Poll for completion
+    let attempts = 0
+    const maxAttempts = 60
+    while (attempts < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      const statusResponse = await fetch(`https://api.assemblyai.com/v2/transcript/${id}`, { headers: { 'Authorization': assemblyApiKey } })
+      if (!statusResponse.ok) {
+        const text = await statusResponse.text()
+        console.error('Failed to check status:', text)
+        throw new Error('Failed to check transcription status')
+      }
+
+      const statusData = await statusResponse.json()
+      if (statusData.status === 'completed') {
+        return new Response(JSON.stringify({ text: statusData.text }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      } else if (statusData.status === 'error') {
+        throw new Error(`Transcription failed: ${statusData.error}`)
+      }
+
+      attempts++
+    }
+
+    throw new Error('Transcription timeout')
 
   } catch (error) {
     console.error('Transcription error:', error);
