@@ -135,20 +135,39 @@ export const ConsultationPage: React.FC = () => {
         return;
       }
 
-  // Keep the full raw transcript as the note content. Do not simplify or remove medical terms.
-  const simplified = transcript;
+      // Process transcript using Gemini
+      console.log('Processing transcript with Gemini...');
+      const fnUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-soap-note`;
+      
+      const response = await fetch(fnUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`
+        },
+        body: JSON.stringify({ transcript })
+      });
 
-      // Save to database (store simplified text in subjective and raw transcript)
+      if (!response.ok) {
+        throw new Error('Failed to process transcript with Gemini');
+      }
+
+      const geminiResult = await response.json();
+      console.log('Gemini processing result:', geminiResult);
+
+      // Save to database with Gemini-processed SOAP note and medical terms
       const { data, error } = await supabase
         .from('medical_notes')
         .upsert({
           consultation_id: id,
-          subjective: simplified || '',
-          objective: '',
-          assessment: '',
-          plan: '',
+          subjective: geminiResult.soap.subjective || '',
+          objective: geminiResult.soap.objective || '',
+          assessment: geminiResult.soap.assessment || '',
+          plan: geminiResult.soap.plan || '',
           raw_transcript: transcript,
-          extracted_entities: {},
+          extracted_entities: { 
+            medical_terms: geminiResult.medicalTerms || [] 
+          },
           is_reviewed: false,
         })
         .select()

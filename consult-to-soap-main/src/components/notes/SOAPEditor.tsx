@@ -96,6 +96,28 @@ Date: ${new Date().toLocaleDateString()}
     });
   };
 
+  const renderMedicalTerms = (extractedEntities: any) => {
+    const medicalTerms = extractedEntities?.medical_terms || [];
+    if (!medicalTerms.length) return null;
+
+    return (
+      <div className="mt-4">
+        <h3 className="text-lg font-semibold mb-2">Medical Terms</h3>
+        <div className="space-y-2">
+          {medicalTerms.map((term: any, index: number) => (
+            <div key={index} className="p-2 bg-secondary/20 rounded-md">
+              <div className="flex items-center gap-2">
+                <Badge variant="outline">{term.category}</Badge>
+                <span className="font-semibold">{term.term}</span>
+              </div>
+              <p className="text-sm text-muted-foreground mt-1">{term.definition}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   const renderEntityBadges = (entities: any) => {
     if (!entities || typeof entities !== 'object') return null;
 

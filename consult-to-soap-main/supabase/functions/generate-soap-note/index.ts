@@ -1,10 +1,33 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { GoogleGenerativeAI } from "https://esm.sh/@google/generative-ai@^0.1.0";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
+
+const SYSTEM_PROMPT = `You are a medical scribe assistant. Your task is to:
+1. Convert the raw transcription into a structured SOAP note format
+2. Extract medical terms and their brief definitions
+3. Ensure medical accuracy and proper formatting
+
+Format the response as JSON with the following structure:
+{
+  "soap": {
+    "subjective": "Patient's symptoms, complaints, and history",
+    "objective": "Physical examination findings and vital signs",
+    "assessment": "Diagnosis and clinical impressions",
+    "plan": "Treatment plan, medications, and follow-up"
+  },
+  "medicalTerms": [
+    {
+      "term": "medical term",
+      "definition": "brief definition",
+      "category": "symptom|diagnosis|medication|procedure"
+    }
+  ]
+}`;
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -12,27 +35,33 @@ serve(async (req) => {
   }
 
   try {
-    const { transcript, patientName } = await req.json()
-    
+    const { transcript } = await req.json();
     if (!transcript) {
-      throw new Error('No transcript provided')
+      throw new Error('transcript is required');
     }
 
-    console.log('Generating basic SOAP note using full transcript (no Gemini)');
+    const geminiApiKey = Deno.env.get('GEMINI_API_KEY');
+    if (!geminiApiKey) {
+      throw new Error('GEMINI_API_KEY is not set');
+    }
 
-    // To preserve every spoken word and all medical terms, we return a basic
-    // structured SOAP object where the `subjective` field contains the full
-    // transcript. Other fields are left empty for manual review.
-    const soapNote = {
-      subjective: transcript,
-      objective: '',
-      assessment: '',
-      plan: '',
-      extracted_entities: {}
-    };
+    console.log('Generating SOAP note using Gemini...');
+    const genAI = new GoogleGenerativeAI(geminiApiKey);
+    const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+
+    const result = await model.generateContent([
+      SYSTEM_PROMPT,
+      `Process this medical consultation transcript into SOAP format and extract medical terms: ${transcript}`
+    ]);
+
+    const response = result.response;
+    const processedText = response.text();
+    
+    // Parse the JSON response
+    const parsedResponse = JSON.parse(processedText);
 
     return new Response(
-      JSON.stringify(soapNote),
+      JSON.stringify(parsedResponse),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
 
