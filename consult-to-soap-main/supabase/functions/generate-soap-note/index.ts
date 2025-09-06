@@ -47,7 +47,27 @@ serve(async (req) => {
 
     console.log('Generating SOAP note using Gemini...');
     const genAI = new GoogleGenerativeAI(geminiApiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+
+    // Try preferred model first, fall back to listing available models if it's not found.
+    let model;
+    try {
+      model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+    } catch (err) {
+      console.warn('Preferred model gemini-pro not available, attempting to list available models', err?.message ?? err);
+      try {
+        // NOTE: assuming the client exposes a listModels() method that returns an array of models.
+        const available = await genAI.listModels?.();
+        const first = Array.isArray(available) && available.length ? (available[0].name || available[0].id || available[0].model || available[0]) : null;
+        if (!first) {
+          throw new Error('no available models returned from listModels');
+        }
+        console.log('Falling back to model:', first);
+        model = genAI.getGenerativeModel({ model: first });
+      } catch (err2) {
+        // Surface a clearer error that the function can return to the caller
+        throw new Error(`[GoogleGenerativeAI Error] model selection failed: ${err2?.message ?? err2}`);
+      }
+    }
 
     const result = await model.generateContent([
       SYSTEM_PROMPT,
