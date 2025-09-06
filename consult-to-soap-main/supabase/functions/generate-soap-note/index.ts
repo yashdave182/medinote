@@ -69,10 +69,51 @@ serve(async (req) => {
       }
     }
 
-    const result = await model.generateContent([
-      SYSTEM_PROMPT,
-      `Process this medical consultation transcript into SOAP format and extract medical terms: ${transcript}`
-    ]);
+    // Attempt to generate content; if the model isn't supported for generateContent
+    // (404 model not found), list available models and retry with a fallback.
+    let result;
+    try {
+      result = await model.generateContent([
+        SYSTEM_PROMPT,
+        `Process this medical consultation transcript into SOAP format and extract medical terms: ${transcript}`
+      ]);
+    } catch (genErr) {
+      console.warn('generateContent failed on initial model:', genErr?.message ?? genErr);
+      const msg = (genErr?.message || '').toString();
+      const isModelNotFound = msg.includes('models/gemini-pro') || msg.includes('model is not found') || msg.includes('404');
+      if (!isModelNotFound) {
+        throw genErr;
+      }
+
+      // Try to discover an alternative model via listModels
+      if (!genAI.listModels) {
+        throw new Error('[GoogleGenerativeAI Error] initial generateContent failed and listModels is not available');
+      }
+
+      const available = await genAI.listModels();
+      // available might be an array or an object with models property
+  // Use `any` to avoid strict typing issues in this small runtime helper.
+  let modelsArr: any[] = [];
+  if (Array.isArray(available)) modelsArr = available as any[];
+  else if (available?.models && Array.isArray(available.models)) modelsArr = available.models as any[];
+
+  // Prefer models with 'gemini' or 'bison' in the name, otherwise pick first.
+  const pick: any = modelsArr.find((m: any) => ((m.name || m.id || m.model || '') + '').toLowerCase().includes('gemini'))
+        || modelsArr.find((m: any) => ((m.name || m.id || m.model || '') + '').toLowerCase().includes('bison'))
+        || modelsArr[0];
+
+  const fallbackName = pick ? (pick.name || pick.id || pick.model || pick) : null;
+      if (!fallbackName) {
+        throw new Error('[GoogleGenerativeAI Error] no fallback model available from listModels');
+      }
+
+      console.log('Retrying generateContent with fallback model:', fallbackName);
+      const fallbackModel = genAI.getGenerativeModel({ model: fallbackName });
+      result = await fallbackModel.generateContent([
+        SYSTEM_PROMPT,
+        `Process this medical consultation transcript into SOAP format and extract medical terms: ${transcript}`
+      ]);
+    }
 
     const response = result.response;
     const processedText = response.text();
